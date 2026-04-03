@@ -1,6 +1,6 @@
 {
 	"name": "@sanskari27/express-lambda-handler",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"description": "Run Express on AWS Lambda with a parse → validate → handler pipeline helper",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
