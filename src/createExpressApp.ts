@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express, { NextFunction, Request, RequestHandler, Response, Router } from 'express';
 import expressActuator from 'express-actuator';
 import https from 'https';
+import { type z, ZodError, type ZodType } from 'zod';
 import { HttpResponse } from './httpResponse';
 import { isLambdaError, LambdaError } from './lambdaError';
 import { ERROR_TYPE, ResponseConfig, STATUS_CODE } from './types';
@@ -128,14 +129,14 @@ function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunct
 }
 
 /**
- * Express middleware factory: parse → validate → async handler, with optional response shaping.
+ * Express middleware factory: parse → Zod validate → async handler, with optional response shaping.
  * Intended for use with {@link httpHandler} (`@codegenie/serverless-express`). It reads API Gateway
  * context via `getCurrentInvoke()`; outside that adapter (e.g. plain Express or `serverless-http`),
  * `authorizer` context passed to `parse` may be undefined.
  */
 export const callback =
 	<
-		TData,
+		TSchema extends ZodType,
 		TResult,
 		TOptions extends { tBody?: unknown; tAuthContext?: unknown } = {
 			tBody: TResult;
@@ -145,9 +146,9 @@ export const callback =
 		parse: (
 			request: Request,
 			authContext: TOptions extends { tAuthContext: infer A } ? A : undefined,
-		) => TData,
-		validate: (data: TData) => boolean,
-		handler: (data: TData) => Promise<TResult>,
+		) => unknown,
+		validate: TSchema,
+		handler: (data: z.infer<TSchema>) => Promise<TResult>,
 		responseConfig?: (
 			data: TResult,
 		) => ResponseConfig<TOptions extends { tBody: infer B } ? B : TResult>,
@@ -161,17 +162,23 @@ export const callback =
 			const { event } = getCurrentInvoke();
 			const authorizer = event?.requestContext?.authorizer;
 
-			const data = parse(
+			const raw = parse(
 				_request,
 				authorizer as TOptions extends { tAuthContext: infer A } ? A : undefined,
 			);
 
-			const isValid = validate(data);
-			if (!isValid) {
-				throw new LambdaError('Invalid request', {
-					code: 'VALIDATION_ERROR',
-					type: ERROR_TYPE.VALIDATION_ERROR,
-				});
+			let data: z.infer<TSchema>;
+			try {
+				data = validate.parse(raw);
+			} catch (e) {
+				if (e instanceof ZodError) {
+					throw new LambdaError('Validation failed', {
+						code: 'VALIDATION_ERROR',
+						type: ERROR_TYPE.VALIDATION_ERROR,
+						cause: e,
+					});
+				}
+				throw e;
 			}
 
 			const body = await handler(data);

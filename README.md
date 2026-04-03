@@ -1,18 +1,18 @@
 # express-lambda-handler
 
-Run [Express](https://expressjs.com/) on **AWS Lambda** with helpers for a **parse → validate → handler** pipeline, consistent JSON error responses, and optional CORS, security headers, and Zod validation.
+Run [Express](https://expressjs.com/) on **AWS Lambda** with helpers for a **parse → Zod validate → handler** pipeline, consistent JSON error responses, and optional CORS and security headers.
 
 ## Install
 
 ```bash
-npm install @sanskari27/express-lambda-handler express
+npm install @sanskari27/express-lambda-handler express zod
 ```
 
-Peer dependencies: `express` ^4.18 or ^5. Optional: `@types/aws-lambda`, `helmet`, `zod` (see below).
+Peer dependencies: `express` ^4.18 or ^5, **`zod` ≥3**. Optional: `@types/aws-lambda`, `helmet`.
 
 ## How to use
 
-1. **Install** the package and `express` (and optional peers above).
+1. **Install** the package, `express`, and `zod` (and optional peers above).
 2. **Choose how Lambda invokes Express** — see the table below. Most API Gateway setups use **`httpHandler`**.
 3. **Build routes** with `Router()` (or reuse an existing `Application` if you use `createLambdaHandler`).
 4. **Attach middleware** — pass global middleware as the second argument to `httpHandler(router, middlewares, options)` (for example CORS or Helmet from this package).
@@ -86,6 +86,7 @@ await request(app).get('/health').expect(200);
 
 ```ts
 import { Router } from 'express';
+import { z } from 'zod';
 import { callback, httpHandler, HttpResponse } from '@sanskari27/express-lambda-handler';
 
 const router = Router();
@@ -98,7 +99,7 @@ router.get(
 	'/hello',
 	callback(
 		(req) => ({ name: String(req.query.name ?? '') }),
-		(data) => data.name.length > 0,
+		z.object({ name: z.string().min(1) }),
 		async (data) => ({ message: `Hello, ${data.name}` }),
 	),
 );
@@ -112,10 +113,27 @@ export const handler = httpHandler(router);
 
 `callback(parse, validate, handler, responseConfig?)` runs:
 
-1. **`parse(req, authContext)`** — `authContext` comes from API Gateway `event.requestContext.authorizer` via `getCurrentInvoke()` (undefined outside that adapter).
-2. **`validate(data)`** — return `false` to trigger a validation error (`400`).
-3. **`handler(data)`** — async business logic.
+1. **`parse(req, authContext)`** — returns raw input (typically `unknown`). `authContext` comes from API Gateway `event.requestContext.authorizer` via `getCurrentInvoke()` (undefined outside that adapter).
+2. **`validate`** — a [Zod](https://zod.dev/) schema (`ZodType`). The raw value from `parse` is passed to `schema.parse(...)`; on failure a **`LambdaError`** with `VALIDATION_ERROR` is thrown (HTTP 400). The handler receives **`z.infer<typeof schema>`**.
+3. **`handler(data)`** — async business logic with validated, typed `data`.
 4. Optional **`responseConfig(body)`** — override status, headers, or body (`ResponseConfig`).
+
+Example POST body:
+
+```ts
+import { z } from 'zod';
+
+const Body = z.object({ email: z.string().email() });
+
+router.post(
+	'/signup',
+	callback(
+		(req) => req.body,
+		Body,
+		async (data) => ({ ok: true, email: data.email }),
+	),
+);
+```
 
 ## Environment variables
 
@@ -135,36 +153,9 @@ export const handler = httpHandler(router);
 - **`getCorsMiddleware(options)`** — wraps [`cors`](https://github.com/expressjs/cors).
 - **`getSecurityHeadersMiddleware(options?)`** — wraps [`helmet`](https://helmetjs.github.io/) (install `helmet` as a dependency).
 
-## Zod integration (optional)
-
-Install `zod`, then import from the subpath:
-
-```ts
-import { callback } from '@sanskari27/express-lambda-handler';
-import { zodParse, zodValidate } from '@sanskari27/express-lambda-handler/zod';
-import { z } from 'zod';
-
-const Body = z.object({ email: z.string().email() });
-
-router.post(
-	'/signup',
-	callback(
-		zodParse(Body, (req) => req.body),
-		zodValidate(),
-		async (data) => {
-			return { ok: true, email: data.email };
-		},
-	),
-);
-```
-
-Invalid input throws a **`LambdaError`** with `ERROR_TYPE.VALIDATION_ERROR` (HTTP 400).
-
 ## API surface
 
 Main package exports: `createExpressApp`, `httpHandler`, `createLambdaHandler`, `callback`, `HttpResponse`, `LambdaError`, `isLambdaError`, `getCorsMiddleware`, `getSecurityHeadersMiddleware`, `ERROR_TYPE`, `STATUS_CODE`, types such as `Middleware`, `ExpressAppOptions`, `HttpHandlerOptions`, `RequestLogInfo`, `ResponseConfig`.
-
-Subpath `@sanskari27/express-lambda-handler/zod`: `zodParse`, `zodValidate`.
 
 ## Notes
 

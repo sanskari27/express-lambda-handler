@@ -10,12 +10,6 @@
 			"import": "./dist/index.js",
 			"require": "./dist/index.js",
 			"default": "./dist/index.js"
-		},
-		"./zod": {
-			"types": "./dist/zod.d.ts",
-			"import": "./dist/zod.js",
-			"require": "./dist/zod.js",
-			"default": "./dist/zod.js"
 		}
 	},
 	"files": [
@@ -56,9 +50,6 @@
 			"optional": true
 		},
 		"helmet": {
-			"optional": true
-		},
-		"zod": {
 			"optional": true
 		}
 	},

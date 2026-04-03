@@ -1,5 +1,6 @@
 import { type NextFunction, type Request, type Response } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 const { getCurrentInvoke } = vi.hoisted(() => ({
 	getCurrentInvoke: vi.fn(),
@@ -27,8 +28,11 @@ describe('callback', () => {
 
 	it('runs parse → validate → handler and returns ok', async () => {
 		const h = callback(
-			(req, auth) => ({ n: Number((req as unknown as { query: { n?: string } }).query.n), auth }),
-			(d) => d.n > 0,
+			(req, auth) => ({
+				n: Number((req as unknown as { query: { n?: string } }).query.n),
+				auth,
+			}),
+			z.object({ n: z.number().positive() }).passthrough(),
 			async (d) => ({ sum: d.n + 1 }),
 		);
 		const req = { method: 'GET', path: '/', query: { n: '2' } } as unknown as Request;
@@ -50,10 +54,10 @@ describe('callback', () => {
 		expect((res as unknown as { statusCode: number }).statusCode).toBe(200);
 	});
 
-	it('calls next with LambdaError when validate returns false', async () => {
+	it('calls next with LambdaError when Zod validation fails', async () => {
 		const h = callback(
 			() => ({ x: 1 }),
-			() => false,
+			z.object({ x: z.literal(2) }),
 			async () => ({}),
 		);
 		const req = { method: 'GET', path: '/' } as Request;
@@ -76,7 +80,7 @@ describe('callback', () => {
 	it('uses created for POST when status not overridden', async () => {
 		const h = callback(
 			() => ({}),
-			() => true,
+			z.object({}),
 			async () => ({ id: 1 }),
 		);
 		const req = { method: 'POST', path: '/' } as Request;
@@ -96,7 +100,7 @@ describe('callback', () => {
 	it('uses noContent when responseConfig sets 204', async () => {
 		const h = callback(
 			() => ({}),
-			() => true,
+			z.object({}),
 			async () => undefined,
 			() => ({ status: 204 as const }),
 		);

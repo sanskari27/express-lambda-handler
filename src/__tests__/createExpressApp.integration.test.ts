@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 vi.mock('@codegenie/serverless-express', () => ({
 	getCurrentInvoke: () => ({ event: { requestContext: {} } }),
@@ -80,7 +81,7 @@ describe('createExpressApp (integration)', () => {
 			'/cb',
 			callback(
 				(req) => ({ q: String(req.query.q ?? '') }),
-				(d) => d.q.length > 0,
+				z.object({ q: z.string().min(1) }),
 				async (d) => ({ message: d.q }),
 			),
 		);
