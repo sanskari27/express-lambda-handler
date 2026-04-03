@@ -1,0 +1,76 @@
+{
+	"name": "@sanskari27/express-lambda-handler",
+	"version": "0.1.0",
+	"description": "Run Express on AWS Lambda with a parse → validate → handler pipeline helper",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"clean": "node -e \"try { require('fs').rmSync('dist', { recursive: true }); } catch (e) { if (e && e.code !== 'ENOENT') throw e; }\"",
+		"build": "npm run clean && tsc",
+		"prepublishOnly": "npm run build",
+		"typecheck": "tsc --noEmit",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix",
+		"verify": "npm run typecheck && npm run lint && npm run format:check && npm test",
+		"test": "npm run build && node -e \"require('./dist/index.js'); console.log('ok');\""
+	},
+	"keywords": [
+		"express",
+		"lambda",
+		"aws",
+		"serverless",
+		"handler"
+	],
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"peerDependencies": {
+		"@types/aws-lambda": ">=8.10.0",
+		"express": "^4.18.0 || ^5.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@types/aws-lambda": {
+			"optional": true
+		}
+	},
+	"dependencies": {
+		"@codegenie/serverless-express": "^4.17.1",
+		"aws-xray-sdk-core": "^3.12.0",
+		"cookie-parser": "^1.4.7",
+		"cors": "^2.8.6",
+		"express-actuator": "^1.8.4",
+		"serverless-http": "^3.2.0"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@types/aws-lambda": "^8.10.161",
+		"@types/cookie-parser": "^1.4.10",
+		"@types/cors": "^2.8.19",
+		"@types/express": "^5.0.0",
+		"@types/express-actuator": "^1.8.3",
+		"@types/node": "^22.10.0",
+		"eslint": "^10.1.0",
+		"eslint-config-prettier": "^10.1.8",
+		"express": "^5.0.0",
+		"prettier": "^3.8.1",
+		"typescript": "^5.7.0",
+		"typescript-eslint": "^8.58.0"
+	},
+	"engines": {
+		"node": ">=18"
+	}
+}
