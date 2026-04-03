@@ -5,6 +5,7 @@ import { ERROR_TYPE, STATUS_CODE } from './types';
 enum DEFAULT_CODE {
 	SUCCESS = 'SUCCESS',
 	CREATED = 'CREATED',
+	NO_CONTENT = 'NO_CONTENT',
 	BAD_REQUEST = 'BAD_REQUEST',
 	UNAUTHORIZED = 'UNAUTHORIZED',
 	FORBIDDEN = 'FORBIDDEN',
@@ -16,6 +17,7 @@ enum DEFAULT_CODE {
 export const codesMap: Map<STATUS_CODE, DEFAULT_CODE> = new Map([
 	[STATUS_CODE.OK, DEFAULT_CODE.SUCCESS],
 	[STATUS_CODE.CREATED, DEFAULT_CODE.CREATED],
+	[STATUS_CODE.NO_CONTENT, DEFAULT_CODE.NO_CONTENT],
 	[STATUS_CODE.BAD_REQUEST, DEFAULT_CODE.BAD_REQUEST],
 	[STATUS_CODE.UNAUTHORIZED, DEFAULT_CODE.UNAUTHORIZED],
 	[STATUS_CODE.FORBIDDEN, DEFAULT_CODE.FORBIDDEN],
@@ -44,6 +46,11 @@ export class HttpResponse {
 	static created<TBody>(response: Response, body?: TBody) {
 		const code = codesMap.get(STATUS_CODE.CREATED)!;
 		response.status(STATUS_CODE.CREATED).send(body || { code });
+	}
+
+	/** 204 No Content — no response body (RFC 7231). */
+	static noContent(response: Response) {
+		response.status(STATUS_CODE.NO_CONTENT).end();
 	}
 
 	static withPresetStatus<TBody>(response: Response, body?: TBody) {

@@ -6,39 +6,102 @@ import express, { NextFunction, Request, RequestHandler, Response, Router } from
 import expressActuator from 'express-actuator';
 import https from 'https';
 import { HttpResponse } from './httpResponse';
-import { isLambdaError } from './lambdaError';
-import { ERROR_TYPE, ResponseConfig } from './types';
+import { isLambdaError, LambdaError } from './lambdaError';
+import { ERROR_TYPE, ResponseConfig, STATUS_CODE } from './types';
 
 export interface Middleware {
 	(req: Request, res: Response, next: NextFunction): void;
+}
+
+export interface RequestLogInfo {
+	method: string;
+	path: string;
+	statusCode: number;
+	durationMs: number;
+	requestId?: string;
+}
+
+export interface ExpressAppOptions {
+	/** Set to `false` to disable Spring-style actuator routes. */
+	actuator?: false | { basePath?: string };
+	/** Max body size for `express.json()` and `express.urlencoded()` (default `'1mb'`). */
+	jsonLimit?: string;
+	/** Called after each response finishes (status, duration, optional request id). */
+	logger?: (info: RequestLogInfo) => void;
+}
+
+export interface HttpHandlerOptions extends ExpressAppOptions {
+	/** Content-Types treated as binary in API Gateway responses (default `['application/pdf']`). */
+	binaryContentTypes?: string[];
 }
 
 const shouldLogRequest =
 	process.env.EXPRESS_LAMBDA_LOG_REQUESTS === '1' ||
 	process.env.EXPRESS_LAMBDA_LOG_REQUESTS === 'true';
 
-export function createExpressApp(router: Router, middlewares: Middleware[] = []) {
+function getRequestId(req: Request): string | undefined {
+	const h = req.headers;
+	const rid = h['x-request-id'];
+	const arid = h['x-amzn-request-id'];
+	if (typeof rid === 'string') return rid;
+	if (typeof arid === 'string') return arid;
+	return undefined;
+}
+
+function requestLoggingMiddleware(log: (info: RequestLogInfo) => void): Middleware {
+	return (req, res, next) => {
+		const start = Date.now();
+		res.on('finish', () => {
+			log({
+				method: req.method,
+				path: req.path,
+				statusCode: res.statusCode,
+				durationMs: Date.now() - start,
+				requestId: getRequestId(req),
+			});
+		});
+		next();
+	};
+}
+
+export function createExpressApp(
+	router: Router,
+	middlewares: Middleware[] = [],
+	options?: ExpressAppOptions,
+) {
+	const jsonLimit = options?.jsonLimit ?? '1mb';
 	const app = express();
 	app.use(cookieParser());
-	app.use(express.json());
-	app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+	app.use(express.json({ limit: jsonLimit }));
+	app.use(express.urlencoded({ extended: true, limit: jsonLimit }));
 
-	if (shouldLogRequest) {
-		app.use((req: Request, res: Response, next: NextFunction) => {
-			const { path, method } = req;
-			console.log(`[express-lambda-handler] ${method} ${path}`);
-			next();
-		});
+	if (options?.logger) {
+		app.use(requestLoggingMiddleware(options.logger));
+	} else if (shouldLogRequest) {
+		app.use(
+			requestLoggingMiddleware((info) => {
+				console.log(
+					`[express-lambda-handler] ${info.method} ${info.path} ${info.statusCode} ${info.durationMs}ms`,
+				);
+			}),
+		);
 	}
 
-	app.use(
-		expressActuator({
-			basePath: '/actuator',
-			infoGitMode: 'simple',
-			infoBuildOptions: undefined,
-			infoDateFormat: 'YYYY-MM-DD HH:mm:ss',
-		}),
-	);
+	const actuatorOpt = options?.actuator;
+	if (actuatorOpt !== false) {
+		const basePath =
+			actuatorOpt && typeof actuatorOpt === 'object' && actuatorOpt.basePath
+				? actuatorOpt.basePath
+				: '/actuator';
+		app.use(
+			expressActuator({
+				basePath,
+				infoGitMode: 'simple',
+				infoBuildOptions: undefined,
+				infoDateFormat: 'YYYY-MM-DD HH:mm:ss',
+			}),
+		);
+	}
 
 	middlewares.forEach((middleware) => app.use(middleware));
 
@@ -48,6 +111,15 @@ export function createExpressApp(router: Router, middlewares: Middleware[] = [])
 }
 
 function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction) {
+	const bodyParserErr = err as Error & { status?: number; statusCode?: number; type?: string };
+	if (
+		bodyParserErr.status === 413 ||
+		bodyParserErr.statusCode === 413 ||
+		bodyParserErr.type === 'entity.too.large'
+	) {
+		res.status(413).send({ code: 'PAYLOAD_TOO_LARGE' });
+		return;
+	}
 	if (isLambdaError(err)) {
 		HttpResponse.error(res, err);
 	} else {
@@ -96,8 +168,9 @@ export const callback =
 
 			const isValid = validate(data);
 			if (!isValid) {
-				throw new Error('Callback middleware, Invalid Request', {
-					cause: ERROR_TYPE.VALIDATION_ERROR,
+				throw new LambdaError('Invalid request', {
+					code: 'VALIDATION_ERROR',
+					type: ERROR_TYPE.VALIDATION_ERROR,
 				});
 			}
 
@@ -118,6 +191,11 @@ export const callback =
 				_response.set(headers);
 			}
 
+			if (isStatusOverridden && status === STATUS_CODE.NO_CONTENT) {
+				HttpResponse.noContent(_response);
+				return;
+			}
+
 			let fn;
 			if (isStatusOverridden) {
 				fn = HttpResponse.withPresetStatus;
@@ -136,13 +214,20 @@ export const callback =
 /**
  * API Gateway–style Lambda handler using `@codegenie/serverless-express` (X-Ray HTTP capture,
  * binary content types, and `getCurrentInvoke()` for {@link callback}).
+ *
+ * **Note:** calls `AWSXRay.captureHTTPsGlobal(https)` which instruments outbound HTTPS for the process.
  */
-export const httpHandler = (router: Router, middlewares?: Middleware[]): APIGatewayProxyHandler => {
+export const httpHandler = (
+	router: Router,
+	middlewares?: Middleware[],
+	options?: HttpHandlerOptions,
+): APIGatewayProxyHandler => {
 	AWSXRay.captureHTTPsGlobal(https);
+	const binaryTypes = options?.binaryContentTypes ?? ['application/pdf'];
 	return serverlessExpress({
-		app: createExpressApp(router, middlewares),
+		app: createExpressApp(router, middlewares, options),
 		binarySettings: {
-			contentTypes: ['application/pdf'],
+			contentTypes: binaryTypes,
 		},
 	});
 };

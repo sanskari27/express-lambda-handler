@@ -3,16 +3,15 @@
 		"target": "ES2022",
 		"module": "commonjs",
 		"moduleResolution": "node",
+		"noEmit": true,
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,
-		"outDir": "dist",
-		"rootDir": "src",
 		"strict": true,
 		"skipLibCheck": true,
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["src/**/*.ts"],
+	"include": ["src/**/*.ts", "vitest.config.ts"],
 	"exclude": ["node_modules", "dist"]
 }
