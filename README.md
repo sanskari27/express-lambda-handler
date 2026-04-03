@@ -86,11 +86,7 @@ await request(app).get('/health').expect(200);
 
 ```ts
 import { Router } from 'express';
-import {
-	callback,
-	httpHandler,
-	HttpResponse,
-} from '@sanskari27/express-lambda-handler';
+import { callback, httpHandler, HttpResponse } from '@sanskari27/express-lambda-handler';
 
 const router = Router();
 
