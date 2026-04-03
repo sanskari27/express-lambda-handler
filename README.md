@@ -10,20 +10,84 @@ npm install @sanskari27/express-lambda-handler express
 
 Peer dependencies: `express` ^4.18 or ^5. Optional: `@types/aws-lambda`, `helmet`, `zod` (see below).
 
-## Choose an adapter
+## How to use
+
+1. **Install** the package and `express` (and optional peers above).
+2. **Choose how Lambda invokes Express** — see the table below. Most API Gateway setups use **`httpHandler`**.
+3. **Build routes** with `Router()` (or reuse an existing `Application` if you use `createLambdaHandler`).
+4. **Attach middleware** — pass global middleware as the second argument to `httpHandler(router, middlewares, options)` (for example CORS or Helmet from this package).
+5. **Export** the returned function as your Lambda handler in CDK, SAM, Serverless Framework, etc.
 
 | Export                    | Use when                                                                                                                                                                                                                    |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`httpHandler`**         | You want **API Gateway + Lambda** with `@codegenie/serverless-express`: binary response types, `getCurrentInvoke()` for the **`callback`** helper (authorizer context), and X-Ray HTTPS capture is applied for the process. |
 | **`createLambdaHandler`** | You already have a full Express `Application` and only need **`serverless-http`**—no `getCurrentInvoke()`, no `callback` authorizer wiring.                                                                                 |
+| **`createExpressApp`**    | You want the same JSON/body/error stack as `httpHandler` but as a plain Express `Application` (for example **integration tests** with `supertest`, or custom hosting).                                                      |
+
+### API Gateway handler (`httpHandler`)
+
+`httpHandler` wraps `createExpressApp` and returns an `APIGatewayProxyHandler`. Use it as the **exported handler** for API Gateway HTTP APIs or REST APIs.
+
+```ts
+import { Router } from 'express';
+import { httpHandler, HttpResponse } from '@sanskari27/express-lambda-handler';
+
+const router = Router();
+router.get('/health', (_req, res) => HttpResponse.ok(res, { ok: true }));
+
+export const handler = httpHandler(router);
+```
+
+Optional **global** middleware (CORS, security headers, etc.) and **options** (body limit, logging, actuator, binary types):
+
+```ts
+import { getCorsMiddleware, httpHandler } from '@sanskari27/express-lambda-handler';
+
+export const handler = httpHandler(router, [getCorsMiddleware({ origin: true })], {
+	jsonLimit: '2mb',
+	actuator: false,
+});
+```
+
+### Existing Express app (`createLambdaHandler`)
+
+If you already call `express()` and mount routes on an `Application`, pass that app to **`createLambdaHandler`** instead of `httpHandler`. You will not get `getCurrentInvoke()`-based **`callback`** authorizer context (see table).
+
+```ts
+import express from 'express';
+import { createLambdaHandler } from '@sanskari27/express-lambda-handler';
+
+const app = express();
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+export const handler = createLambdaHandler(app, {
+	binaryContentTypes: ['application/pdf', 'image/png'],
+});
+```
+
+### Local or custom HTTP server (`createExpressApp`)
+
+Use **`createExpressApp(router, middlewares?, options?)`** when you need the same middleware stack (JSON parser, error handler, optional actuator) **outside** Lambda—for example HTTP tests (add [`supertest`](https://github.com/ladjs/supertest) as a dev dependency):
+
+```ts
+import request from 'supertest';
+import { Router } from 'express';
+import { createExpressApp, HttpResponse } from '@sanskari27/express-lambda-handler';
+
+const router = Router();
+router.get('/health', (_req, res) => HttpResponse.ok(res, { ok: true }));
+
+const app = createExpressApp(router);
+// inside an async test (Vitest, Jest, …)
+await request(app).get('/health').expect(200);
+```
 
 ## Quick start (`httpHandler`)
 
 ```ts
-import express, { Router } from 'express';
+import { Router } from 'express';
 import {
 	callback,
-	createExpressApp,
 	httpHandler,
 	HttpResponse,
 } from '@sanskari27/express-lambda-handler';
@@ -99,16 +163,6 @@ router.post(
 ```
 
 Invalid input throws a **`LambdaError`** with `ERROR_TYPE.VALIDATION_ERROR` (HTTP 400).
-
-## `createLambdaHandler` and binary types
-
-```ts
-import { createLambdaHandler } from '@sanskari27/express-lambda-handler';
-
-export const handler = createLambdaHandler(app, {
-	binaryContentTypes: ['application/pdf', 'image/png'],
-});
-```
 
 ## API surface
 

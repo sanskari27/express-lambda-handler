@@ -1,28 +1,36 @@
-# Publishes to npm after the same checks as CI (verify).
+# Publishes the built dist/ to npm, then commits the version bump and pushes an annotated tag.
 #
 # Setup (one time):
 # 1. npmjs.com → Access Tokens → Granular token (or "Automation") with permission to publish this package.
 # 2. GitHub repo → Settings → Secrets and variables → Actions → New repository secret: NPM_TOKEN
 #
-# Release: bump "version" in package.json, commit, then:
-#   git tag v0.1.0 && git push origin v0.1.0
-# Or run this workflow manually from the Actions tab (workflow_dispatch).
+# Release: Actions → Publish to npm → Run workflow → choose major, minor, or patch.
 
 name: Publish to npm
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Semver bump from current package.json version'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -32,10 +40,34 @@ jobs:
 
       - run: npm ci
 
+      - name: Bump package.json version
+        run: |
+          set -euo pipefail
+          BUMP="${{ github.event.inputs.bump }}"
+          npm version "$BUMP" --no-git-tag-version
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "GIT_TAG=v${VERSION}" >> "$GITHUB_ENV"
+          echo "Publishing npm ${VERSION} as git tag v${VERSION}"
+
       - name: Verify (typecheck, lint, format, test)
         run: npm run verify
 
-      - name: Publish to npm
+      - name: Publish to npm (prepublishOnly builds dist/)
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Commit version bump and push tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --staged --quiet; then
+            echo "::error::No staged changes (version bump missing?)"
+            exit 1
+          fi
+          git commit -m "chore: release ${GIT_TAG}"
+          git tag -a "${GIT_TAG}" -m "Release ${GIT_TAG}"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "${GIT_TAG}"
